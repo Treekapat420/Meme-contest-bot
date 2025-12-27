@@ -1,14 +1,34 @@
 import math
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, MessageReactionUpdated
 
 from .config import Config
 from .db import DB
 from .solana import SOL_ADDR_RE, get_token_balance_raw, get_token_decimals, get_price_usd_dexscreener
 
+
 def is_admin(cfg: Config, user_id: int) -> bool:
     return user_id in cfg.admin_ids
+
+
+def is_meme_media(m: Message) -> bool:
+    # Typical meme formats
+    if m.photo or m.video or m.animation:
+        return True
+
+    # Some memes are uploaded as documents (images/gifs)
+    if m.document and m.document.mime_type:
+        mt = (m.document.mime_type or "").lower()
+        if mt.startswith("image/") or mt in ("image/gif", "video/mp4"):
+            return True
+
+    return False
+
+
+# What counts as a "like"
+LIKE_EMOJIS = {"👍", "❤️", "🔥"}
+
 
 def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
     dp = Dispatcher()
@@ -22,7 +42,7 @@ def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
         status = "LIVE ✅" if live else ("Active (not in window) ⚠️" if active else "Not started ❌")
 
         text = (
-            "🏁 *Memecoin Contest Bot*\n\n"
+            "🏁 *Meme Contest Bot*\n\n"
             f"Token mint (CA): `{cfg.token_mint}`\n"
             f"Min hold: **${cfg.min_hold_usd:.2f}**\n\n"
             "✅ To participate you must be a holder.\n"
@@ -33,6 +53,10 @@ def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
         )
         if end_ts:
             text += f"Ends: <t:{end_ts}:F>\n"
+
+        if cfg.contest_group_id != 0:
+            text += f"\nScoring Group ID: `{cfg.contest_group_id}`\n"
+
         await m.answer(text, parse_mode="Markdown")
 
     @dp.message(Command("status"))
@@ -41,7 +65,7 @@ def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
         active, start_ts, end_ts = database.contest_status()
         live = database.contest_is_live()
         await m.answer(
-            f"Active: {active}\nLive: {live}\nStart: {start_ts}\nEnd: {end_ts}"
+            f"Active: {active}\nLive: {live}\nStart: {start_ts}\nEnd: {end_ts}\nGroup: {cfg.contest_group_id}"
         )
 
     @dp.message(Command("verify"))
@@ -103,7 +127,7 @@ def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
             return await m.answer("You must verify as a holder first: `/verify YOUR_SOL_WALLET`", parse_mode="Markdown")
 
         database.mark_joined(m.from_user.id)
-        await m.answer("🏁 You’re in! Use `/leaderboard` to track the rankings.", parse_mode="Markdown")
+        await m.answer("🏁 You’re in! Post memes in the contest group to earn points.", parse_mode="Markdown")
 
     @dp.message(Command("leaderboard"))
     async def leaderboard(m: Message):
@@ -189,11 +213,100 @@ def build_dispatcher(bot: Bot, cfg: Config, database: DB) -> Dispatcher:
         rows = database.top_n(3)
         if not rows:
             return await m.answer("No entries yet.")
-        prizes = ["🥇", "🥈", "🥉"]
-        lines = ["🏆 *Winners (current)*"]
+        medals = ["🥇", "🥈", "🥉"]
+        lines = ["🏆 *Top 3 (current)*"]
         for i, r in enumerate(rows):
             name = r["username"] or f"user_{r['tg_id']}"
-            lines.append(f"{prizes[i]} @{name} — *{int(r['points'])}* pts")
+            lines.append(f"{medals[i]} @{name} — *{int(r['points'])}* pts")
         await m.answer("\n".join(lines), parse_mode="Markdown")
+
+    # -------- Auto Scoring (Group) --------
+    # Rules:
+    # +1 for posting meme media (NOT as a reply)
+    # +1 to meme owner for each reply on that meme (replier gets 0)
+    # +1 to meme owner for each "like" reaction (unique user per meme) (liker gets 0)
+
+    @dp.message()
+    async def meme_post_points(m: Message):
+        if cfg.contest_group_id == 0 or m.chat.id != cfg.contest_group_id:
+            return
+        if not m.from_user:
+            return
+        if not database.contest_is_live():
+            return
+
+        # Only score "posts" (not replies)
+        if m.reply_to_message is not None:
+            return
+
+        u = database.get_user(m.from_user.id)
+        if not u or int(u["verified"]) != 1 or u["joined_at"] is None:
+            return
+
+        if not is_meme_media(m):
+            return
+
+        inserted = database.insert_meme(m.chat.id, m.message_id, m.from_user.id)
+        if inserted:
+            database.add_points(m.from_user.id, 1)
+
+    @dp.message()
+    async def meme_reply_points(m: Message):
+        if cfg.contest_group_id == 0 or m.chat.id != cfg.contest_group_id:
+            return
+        if not m.from_user or not m.reply_to_message:
+            return
+        if not database.contest_is_live():
+            return
+
+        parent_id = m.reply_to_message.message_id
+        owner_id = database.get_meme_owner(m.chat.id, parent_id)
+        if owner_id is None:
+            return  # not a reply to a tracked meme
+
+        # Only score once per reply message
+        if not database.mark_reply_scored(m.chat.id, m.message_id):
+            return
+
+        # Owner must still be verified + joined to earn
+        owner = database.get_user(owner_id)
+        if not owner or int(owner["verified"]) != 1 or owner["joined_at"] is None:
+            return
+
+        database.add_points(owner_id, 1)
+
+    @dp.message_reaction()
+    async def meme_like_points(event: MessageReactionUpdated):
+        if cfg.contest_group_id == 0 or event.chat.id != cfg.contest_group_id:
+            return
+        if not database.contest_is_live():
+            return
+
+        meme_id = event.message_id
+        reactor_id = event.user.id
+
+        owner_id = database.get_meme_owner(event.chat.id, meme_id)
+        if owner_id is None:
+            return  # only reactions on tracked memes count
+
+        # Only count if NEW reaction includes a like emoji
+        new_emojis = set()
+        for r in (event.new_reaction or []):
+            emoji = getattr(r, "emoji", None)
+            if emoji:
+                new_emojis.add(emoji)
+
+        if not (new_emojis & LIKE_EMOJIS):
+            return
+
+        # 1 point per reacting user per meme (anti toggle farm)
+        if not database.mark_reaction_scored(event.chat.id, meme_id, reactor_id):
+            return
+
+        owner = database.get_user(owner_id)
+        if not owner or int(owner["verified"]) != 1 or owner["joined_at"] is None:
+            return
+
+        database.add_points(owner_id, 1)
 
     return dp
