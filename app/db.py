@@ -1,9 +1,11 @@
 import sqlite3
 import time
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
+
 
 def now_ts() -> int:
     return int(time.time())
+
 
 class DB:
     def __init__(self, path: str):
@@ -18,6 +20,7 @@ class DB:
         con = self.conn()
         cur = con.cursor()
 
+        # users + wallets
         cur.execute("""
         CREATE TABLE IF NOT EXISTS users(
           tg_id INTEGER PRIMARY KEY,
@@ -28,6 +31,7 @@ class DB:
         )
         """)
 
+        # points
         cur.execute("""
         CREATE TABLE IF NOT EXISTS points(
           tg_id INTEGER PRIMARY KEY,
@@ -35,6 +39,7 @@ class DB:
         )
         """)
 
+        # contest state
         cur.execute("""
         CREATE TABLE IF NOT EXISTS contest(
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -44,6 +49,39 @@ class DB:
         )
         """)
         cur.execute("INSERT OR IGNORE INTO contest(id, start_ts, end_ts, is_active) VALUES(1, NULL, NULL, 0)")
+
+        # NEW: meme ownership registry
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS memes(
+          chat_id INTEGER NOT NULL,
+          meme_message_id INTEGER NOT NULL,
+          owner_tg_id INTEGER NOT NULL,
+          created_ts INTEGER NOT NULL,
+          PRIMARY KEY(chat_id, meme_message_id)
+        )
+        """)
+
+        # NEW: prevent double scoring of replies
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS scored_replies(
+          chat_id INTEGER NOT NULL,
+          reply_message_id INTEGER NOT NULL,
+          created_ts INTEGER NOT NULL,
+          PRIMARY KEY(chat_id, reply_message_id)
+        )
+        """)
+
+        # NEW: prevent reaction toggle farming
+        # (1 point per user per meme)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS scored_reactions(
+          chat_id INTEGER NOT NULL,
+          meme_message_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          created_ts INTEGER NOT NULL,
+          PRIMARY KEY(chat_id, meme_message_id, user_id)
+        )
+        """)
 
         con.commit()
         con.close()
@@ -183,4 +221,56 @@ class DB:
         con = self.conn()
         con.execute("UPDATE contest SET is_active=0 WHERE id=1")
         con.commit()
-        con.close() 
+        con.close()
+
+    # ---------- Meme scoring storage ----------
+    def insert_meme(self, chat_id: int, meme_message_id: int, owner_tg_id: int) -> bool:
+        con = self.conn()
+        try:
+            con.execute(
+                "INSERT INTO memes(chat_id, meme_message_id, owner_tg_id, created_ts) VALUES(?,?,?,?)",
+                (chat_id, meme_message_id, owner_tg_id, now_ts())
+            )
+            con.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            con.close()
+
+    def get_meme_owner(self, chat_id: int, meme_message_id: int) -> Optional[int]:
+        con = self.conn()
+        row = con.execute(
+            "SELECT owner_tg_id FROM memes WHERE chat_id=? AND meme_message_id=?",
+            (chat_id, meme_message_id)
+        ).fetchone()
+        con.close()
+        return int(row["owner_tg_id"]) if row else None
+
+    def mark_reply_scored(self, chat_id: int, reply_message_id: int) -> bool:
+        con = self.conn()
+        try:
+            con.execute(
+                "INSERT INTO scored_replies(chat_id, reply_message_id, created_ts) VALUES(?,?,?)",
+                (chat_id, reply_message_id, now_ts())
+            )
+            con.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            con.close()
+
+    def mark_reaction_scored(self, chat_id: int, meme_message_id: int, user_id: int) -> bool:
+        con = self.conn()
+        try:
+            con.execute(
+                "INSERT INTO scored_reactions(chat_id, meme_message_id, user_id, created_ts) VALUES(?,?,?,?)",
+                (chat_id, meme_message_id, user_id, now_ts())
+            )
+            con.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            con.close()
