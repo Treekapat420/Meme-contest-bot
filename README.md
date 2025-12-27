@@ -1,67 +1,69 @@
 🏆 Meme Contest Bot (Telegram) — Holders Only
 
-A Telegram contest bot for Solana memecoins that enforces wallet verification, a minimum USD hold, and runs a leaderboard-based contest with automatic compliance checks.
+A Telegram contest bot for Solana memecoins that enforces wallet verification, a minimum USD hold, and automatically tracks meme engagement points in a contest group.
 
-Built in Python, deployed on Railway, and designed for fair, holders-only competitions.
+Built in Python, deployed on Railway, and designed for fair, holders-only meme competitions.
 
 ⸻
 
 🚀 Features
 	•	✅ Solana wallet verification
 	•	💵 Minimum hold enforced ($5 USD)
+	•	🧾 Tracks Telegram user ID + verified wallet together
+	•	🖼️ Automatic meme scoring
 	•	📈 Live leaderboard
-	•	🧮 Admin-controlled scoring
+	•	🧮 Admin overrides for points
 	•	⏱️ Timed contest (default: 14 days)
 	•	🔁 Automated holder sweeps (re-verifies wallets every 6 hours)
 	•	🚫 Auto-removal if wallet drops below minimum
 	•	☁️ Railway-ready deployment
-	•	🧠 Clean, auditable logic (no referrals, no exploits)
 
 ⸻
 
-🔐 Holder Verification Logic
-	1.	User verifies wallet via /verify
-	2.	Bot checks:
-	•	Token balance (on-chain)
-	•	Token decimals (RPC)
-	•	USD price (Dexscreener)
-	3.	Wallet must hold ≥ $5 USD worth of the token
-	4.	Bot re-checks all participants every 6 hours
-	5.	If balance falls below minimum:
-	•	User is unverified
-	•	User is removed from contest
-	•	User can re-verify anytime
+🧠 How Points Are Earned (Current Rules)
+
+Points are automatically tracked in the designated contest Telegram group.
+
+✅ Meme Posting
+	•	+1 point when a verified + joined user posts a meme
+	•	Meme must be media:
+	•	Photo
+	•	Video
+	•	GIF / animation
+	•	Meme must be a new post, not a reply
+
+⸻
+
+💬 Replies on Your Meme
+	•	+1 point to the meme owner for each reply on their meme
+	•	Replies must be direct replies to the original meme post
+	•	❌ Repliers do NOT receive points
+
+⸻
+
+👍 Likes on Your Meme (Reactions)
+	•	+1 point to the meme owner for each unique user reaction
+	•	Reactions counted as “likes” by default:
+	•	👍
+	•	❤️
+	•	🔥
+	•	Each user can only award 1 reaction point per meme
+	•	❌ Likers do NOT receive points
+
+⸻
+
+🚫 Anti-Abuse Rules
+	•	No double-counting of replies
+	•	No reaction toggle farming
+	•	Only verified + joined users can earn points
+	•	Meme owner must still meet the $5 minimum hold to receive points
 
 ⸻
 
 🧾 Contest Rules (Default)
 	•	Chain: Solana
-	•	Token Mint:
-7VskDPVqgyf5VLtAVw23renwvepm4zScHeuHHw2dpump
-	•	Minimum Hold: $5 USD
+	•	Token Mint: 7VskDPVqgyf5VLtAVw23renwvepm4zScHeuHHw2dpump
+		•	Minimum Hold: $5 USD
 	•	Contest Length: 14 days
-	•	Scoring: Admin-awarded points
-	•	Prizes: External payout (not handled by bot)
-
-⸻
-
-🤖 Telegram Commands
-
-👤 User Commands
-Command                 Description
-/start              View contest info
-/verify <wallet>    Verify Solana wallet
-/join             Join contest (holders only)
-/leaderboard        View top 10
-/myrank             View your rank
-
-🛠️ Admin Commands
-Command                 Description
-/setcontest <days>      Start contest
-/endcontest             End contest
-/addpoints @user 10     Add points
-/removepoints @user 5   Remove points
-/winners                Show top 3
-/status                 Contest status
-
-
+	•	Scoring: Fully automatic (meme engagement)
+	•	Payouts: Handled manually (not by bot)
