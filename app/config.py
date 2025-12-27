@@ -12,6 +12,7 @@ class Config:
     sweep_every_seconds: int
     kick_on_fail: bool
     db_path: str
+    contest_group_id: int
 
 def load_config() -> Config:
     bot_token = os.getenv("BOT_TOKEN", "").strip()
@@ -21,6 +22,7 @@ def load_config() -> Config:
     admin_ids = set(int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip())
     sol_rpc_url = os.getenv("SOL_RPC_URL", "").strip()
     token_mint = os.getenv("TOKEN_MINT", "").strip()
+    contest_group_id = int(os.getenv("CONTEST_GROUP_ID", "0"))
 
     if not sol_rpc_url or not token_mint:
         raise RuntimeError("SOL_RPC_URL and TOKEN_MINT are required")
@@ -36,3 +38,4 @@ def load_config() -> Config:
         kick_on_fail=os.getenv("KICK_ON_FAIL", "true").lower() == "true",
         db_path=os.getenv("DB_PATH", "contest.db"),
     )
+        contest_group_id=contest_group_id,
